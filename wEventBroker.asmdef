@@ -1,0 +1,8 @@
+{
+    "name": "wEventBroker",
+    "references": [],
+    "optionalUnityReferences": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false
+}
