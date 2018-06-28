@@ -5,7 +5,7 @@ namespace wLib
 {
     public class UnityLogService : ILogService
     {
-        private bool _doLog;
+        private bool _doLog = true;
 
         public void SwitchLog(bool toggle)
         {
