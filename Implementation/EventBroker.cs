@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
+using JetBrains.Annotations;
 using UnityEngine;
 
 namespace wLib
@@ -11,87 +13,175 @@ namespace wLib
     {
         private const int MaxCallDepth = 5;
 
-        private readonly Dictionary<Type, Delegate> _events = new Dictionary<Type, Delegate>(32);
-        private readonly Dictionary<Type, object> _cachedEvents = new Dictionary<Type, object>();
-
         private int _eventsInCall;
 
-        public void Subscribe<T>(EvenetAction<T> eventAction)
-        {
-            if (eventAction != null)
-            {
-                var eventType = typeof(T);
-                Delegate rawList;
-                _events.TryGetValue(eventType, out rawList);
-                _events[eventType] = (rawList as EvenetAction<T>) + eventAction;
-            }
-        }
+        private readonly Dictionary<string, Dictionary<Type, Delegate>> _events =
+            new Dictionary<string, Dictionary<Type, Delegate>>(32);
 
-        public void Unsubscribe<T>(EvenetAction<T> eventAction, bool keepEvent = false)
+        public void Subscribe<T>(string eventName, EventAction<T> eventAction)
         {
-            if (eventAction != null)
+            if (eventAction == null) { throw new Exception("No subscriber."); }
+
+            var eventType = typeof(T);
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates))
             {
-                var eventType = typeof(T);
-                Delegate rawList;
-                if (_events.TryGetValue(eventType, out rawList))
+                var action = eventAction;
+                delegates = new Dictionary<Type, Delegate> {{eventType, action}};
+                _events.Add(eventName, delegates);
+            }
+            else
+            {
+                Delegate del;
+                if (delegates.TryGetValue(eventType, out del))
                 {
-                    if (rawList != null)
-                    {
-                        var list = (EvenetAction<T>) rawList - eventAction;
-                        if (list == null && !keepEvent) { _events.Remove(eventType); }
-                        else { _events[eventType] = list; }
-                    }
+                    delegates[eventType] = (del as EventAction<T>) + eventAction;
+                }
+                else
+                {
+                    var action = eventAction;
+                    delegates.Add(eventType, action);
                 }
             }
         }
 
-        public void UnsubscribeAll<T>(bool keepEvent = false)
+        public void Subscribe(string eventName, EventAction eventAction)
         {
-            var eventType = typeof(T);
-            Delegate rawList;
-            if (_events.TryGetValue(eventType, out rawList))
+            if (eventAction == null) { throw new Exception("No subscriber."); }
+
+            var eventType = typeof(EventAction);
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates))
             {
-                if (keepEvent) { _events[eventType] = null; }
-                else { _events.Remove(eventType); }
+                var action = eventAction;
+                delegates = new Dictionary<Type, Delegate> {{eventType, action}};
+                _events.Add(eventName, delegates);
+            }
+            else
+            {
+                Delegate del;
+                if (delegates.TryGetValue(eventType, out del))
+                {
+                    delegates[eventType] = (del as EventAction) + eventAction;
+                }
+                else
+                {
+                    var action = eventAction;
+                    delegates.Add(eventType, action);
+                }
             }
         }
 
-        public void UnsubscribeAndClearAllEvents()
+        public void Unsubscribe<T>(string eventName, EventAction<T> eventAction, bool keepEvent = false)
         {
-            _events.Clear();
+            if (eventAction == null) { throw new Exception("No subscriber."); }
+
+            var eventType = typeof(T);
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates)) { return; }
+
+            Delegate del;
+            if (!delegates.TryGetValue(eventType, out del)) { return; }
+
+            if (del == null) { return; }
+
+            var ret = (EventAction<T>) del - eventAction;
+            if (ret == null && !keepEvent)
+            {
+                delegates.Remove(eventType);
+                if (delegates.Count <= 0) { _events.Remove(eventName); }
+            }
+            else { delegates[eventType] = ret; }
         }
 
-        public void Publish<T>(T eventMessage)
+        public void Unsubscribe(string eventName, EventAction eventAction, bool keepEvent = false)
+        {
+            if (eventAction == null) { throw new Exception("No subscriber."); }
+
+            var eventType = typeof(EventAction);
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates)) { return; }
+
+            Delegate del;
+            if (!delegates.TryGetValue(eventType, out del)) { return; }
+
+            if (del == null) { return; }
+
+            var ret = (EventAction) del - eventAction;
+            if (ret == null && !keepEvent)
+            {
+                delegates.Remove(eventType);
+                if (delegates.Count <= 0) { _events.Remove(eventName); }
+            }
+            else { delegates[eventType] = ret; }
+        }
+
+        public void UnsubscribeAll(string eventName, bool keepEvent = false)
+        {
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates)) { return; }
+
+            if (keepEvent)
+            {
+                foreach (var valuePair in delegates) { delegates[valuePair.Key] = null; }
+            }
+            else { _events[eventName].Clear(); }
+        }
+
+        public void Publish<T>(string eventName, T eventMessage)
         {
             if (_eventsInCall >= MaxCallDepth)
             {
-#if UNITY_EDITOR
                 Debug.LogError("Max call depth reached");
-#endif
                 return;
             }
 
-            var eventType = typeof(T);
-            Delegate rawList;
-            _events.TryGetValue(eventType, out rawList);
-            var list = rawList as EvenetAction<T>;
-            if (list != null)
-            {
-                _eventsInCall++;
-                try { list(eventMessage); }
-                catch (Exception ex) { Debug.LogError(ex); }
+            if (eventMessage == null) { throw new Exception("Message is null."); }
 
-                _eventsInCall--;
-            }
+            var eventType = eventMessage.GetType();
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates)) { return; }
+
+            Delegate del;
+            if (!delegates.TryGetValue(eventType, out del)) { return; }
+
+            var evtAction = del as EventAction<T>;
+
+            _eventsInCall++;
+            try { evtAction?.Invoke(eventMessage); }
+            catch (Exception ex) { Debug.LogException(ex); }
+
+            _eventsInCall--;
         }
 
-        public void Publish<T>() where T : new()
+        public void Publish(string eventName)
         {
-            var type = typeof(T);
-            if (!_cachedEvents.ContainsKey(type)) { _cachedEvents.Add(type, new T()); }
+            if (_eventsInCall >= MaxCallDepth)
+            {
+                Debug.LogError("Max call depth reached");
+                return;
+            }
 
-            var evt = (T) _cachedEvents[type];
-            Publish(evt);
+            var eventType = typeof(EventAction);
+
+            Dictionary<Type, Delegate> delegates;
+            if (!_events.TryGetValue(eventName, out delegates)) { return; }
+
+            Delegate del;
+            if (!delegates.TryGetValue(eventType, out del)) { return; }
+
+            var evtAction = del as EventAction;
+
+            _eventsInCall++;
+            try { evtAction?.Invoke(); }
+            catch (Exception ex) { Debug.LogException(ex); }
+
+            _eventsInCall--;
         }
     }
 }
